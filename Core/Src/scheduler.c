@@ -1,82 +1,131 @@
 /*
  * scheduler.c
  *
- *  Created on: Nov 20, 2023
- *      Author: LENOVO
+ *  Created on: Nov 14, 2025
+ *      Author: hanh
  */
 
 #include "scheduler.h"
 
 int TIME_CYCLE; // Time cycle
 
-sTasks SCH_tasks_G[SCH_MAX_TASKS];
-uint8_t current_index_task = 0;
+sTasks heap[SCH_MAX_TASKS];
+uint8_t heap_size = 0;
+static uint32_t nextTaskID = 0;
+
+void swap(sTasks *a, sTasks *b) {
+    sTasks t = *a;
+    *a = *b;
+    *b = t;
+}
+
+void heapify_up(int i) {
+    while(i > 0) {
+        int parent = (i - 1) / 2;
+        if(heap[i].Delay < heap[parent].Delay) {
+            swap(&heap[i], &heap[parent]);
+            i = parent;
+        } else break;
+    }
+}
+
+void heapify_down(int i) {
+    while(1) {
+        int left = 2*i + 1;
+        int right = 2*i + 2;
+        int smallest = i;
+
+        if(left < heap_size && heap[left].Delay < heap[smallest].Delay)
+            smallest = left;
+        if(right < heap_size && heap[right].Delay < heap[smallest].Delay)
+            smallest = right;
+
+        if(smallest != i) {
+            swap(&heap[i], &heap[smallest]);
+            i = smallest;
+        } else break;
+    }
+}
+
+void heap_push(sTasks t) {
+    heap[heap_size] = t;
+    heapify_up(heap_size);
+    heap_size++;
+}
+
+sTasks heap_pop() {
+    sTasks top = heap[0];
+    heap_size--;
+
+    if (heap_size > 0) {
+        heap[0] = heap[heap_size];
+        heapify_down(0);
+    }
+
+    return top;
+}
 
 void SCH_Init(void){
-	while (current_index_task != 0) {
-		SCH_Delete_Task(0);
-	}
+    heap_size = 0;
 }
-void SCH_Update(void){
-	for(int i = 0; i < current_index_task; i++) {
-		if(SCH_tasks_G[i].Delay > 0) {
-			// Decrement the delay
-			SCH_tasks_G[i].Delay--;
-		}
-		else {
-			// Schedule periodic tasks to run again
-			SCH_tasks_G[i].Delay = SCH_tasks_G[i].Period;
-			//Inc. the ’RunMe’ flag
-			SCH_tasks_G[i].RunMe += 1;
-		}
-	}
-}
-void SCH_Dispatch_Tasks(void){
-	for(int i = 0; i < current_index_task; i++) {
-		if(SCH_tasks_G[i].RunMe > 0) {
-			SCH_tasks_G[i].RunMe--;		// Reset / reduce RunMe flag
-			(*SCH_tasks_G[i].pTask)();	// Run the task
-			// Periodic tasks will automatically run again
-			// If this is a "one shot" task, remove it from the array
-			if (SCH_tasks_G[i].Period == 0) {
-				SCH_Delete_Task(i);
-				i--;
-			}
-		}
-	}
-}
-uint32_t SCH_Add_Task (void(*pFunction)(), uint32_t DELAY, uint32_t PERIOD){
-	if(current_index_task < SCH_MAX_TASKS){
 
-		SCH_tasks_G[current_index_task].pTask = pFunction;
-		SCH_tasks_G[current_index_task].Delay = DELAY/TIME_CYCLE;
-		SCH_tasks_G[current_index_task].Period = PERIOD/TIME_CYCLE;
-		SCH_tasks_G[current_index_task].RunMe = 0;
-		// Add to the end of array
-		SCH_tasks_G[current_index_task].TaskID = current_index_task;
-		// Update current_index_task
-		current_index_task++;
-		return SCH_tasks_G[current_index_task].TaskID;
-	}
-	return -1;
+void SCH_Update(void) {
+
+    if (heap_size == 0) return;
+
+    sTasks t = heap_pop();
+
+    if (t.Delay > 0)
+        t.Delay--;
+
+    if (t.Delay == 0) {
+        t.RunMe = 1;
+        t.Delay = t.Period;   // periodic
+    }
+
+    heap_push(t);
 }
-uint8_t SCH_Delete_Task(uint32_t taskID){
-	// If no task in array or taskID not exist, return -1
-	if (current_index_task == 0 || taskID < 0 || taskID >= SCH_MAX_TASKS) {
-		return -1;
-	}
-	for (int i = taskID; i < SCH_MAX_TASKS-1; i++) {
-		// Move task from index i+1 -> i
-		SCH_tasks_G[i].pTask = SCH_tasks_G[i+1].pTask;
-		SCH_tasks_G[i].Delay = SCH_tasks_G[i+1].Delay;
-		SCH_tasks_G[i].Period = SCH_tasks_G[i+1].Period;
-		SCH_tasks_G[i].RunMe = SCH_tasks_G[i+1].RunMe;
-	}
-	// Reset SCH_tasks_G[SCH_MAX_TASKS-1]
-	SCH_tasks_G[SCH_MAX_TASKS-1].pTask = 0x0000;
-	SCH_tasks_G[SCH_MAX_TASKS-1].Delay = 0;
-	SCH_tasks_G[SCH_MAX_TASKS-1].Period = 0;
-	SCH_tasks_G[SCH_MAX_TASKS-1].RunMe = 0;
-	current_index_task--;
-	return taskID;
+
+void SCH_Dispatch_Tasks(void) {
+
+    if (heap_size == 0) return;
+
+    if (heap[0].RunMe > 0) {
+        heap[0].RunMe--;
+        heap[0].pTask();
+    }
+}
+
+uint32_t SCH_Add_Task(void (*pFunction)(), uint32_t DELAY, uint32_t PERIOD) {
+
+    if (heap_size >= SCH_MAX_TASKS)
+        return -1;
+
+    sTasks t;
+    t.pTask  = pFunction;
+    t.Delay  = DELAY / TIME_CYCLE;
+    t.Period = PERIOD / TIME_CYCLE;
+    t.RunMe  = 0;
+    t.TaskID = nextTaskID++;
+
+    heap_push(t);
+    return t.TaskID;
+}
+
+
+uint8_t SCH_Delete_Task(uint32_t taskID) {
+
+    if (heap_size == 0) return -1;
+
+    for (int i = 0; i < heap_size; i++) {
+        if (heap[i].TaskID == taskID) {
+
+            heap[i] = heap[heap_size - 1];
+            heap_size--;
+            heapify_down(i);
+            heapify_up(i);
+            return taskID;
+        }
+    }
+    return -1;
 }

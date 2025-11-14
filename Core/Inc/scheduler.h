@@ -1,8 +1,8 @@
 /*
  * scheduler.h
  *
- *  Created on: Nov 20, 2023
- *      Author: LENOVO
+ *  Created on: Nov 14, 2025
+ *      Author: hanh
  */
 
 #ifndef INC_SCHEDULER_H_
